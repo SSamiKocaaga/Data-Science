@@ -149,8 +149,7 @@ SELECT * INTO combined_table
 		SELECT a.Ord_id, a.Prod_id, a.Ship_id, a.Cust_id, a.Sales, a.Discount, a.Order_Quantity, a. Profit, a.Shipping_Cost,
 				a.Product_Base_Margin, b.Customer_Name, b.Customer_Segment, b.Province, b.Region,
 				c.Order_Priority, c.Order_Date, d.Product_Name, d.Category_Name, e.Ship_Mode, e.Ship_Date
-		FROM market_fact AS a  
-		JOIN cust_dimen AS b 
+		FROM market_fact AS a JOIN cust_dimen AS b 
 		ON a.Cust_id = b.Cust_id
 		JOIN orders_dimen AS c
 		ON a.Ord_id = c.Order_id
@@ -164,10 +163,10 @@ SELECT * FROM combined_table ORDER BY Order_Date
 
 --ANSWER 2
 
-SELECT TOP 3 Customer_Name, SUM(Order_Quantity) AS Quantity 
+SELECT TOP 3 Cust_id, Customer_Name, COUNT(Ord_id) AS Cust_Orders 
 FROM combined_table 
-GROUP BY Customer_Name 
-ORDER BY SUM(Order_Quantity) DESC
+GROUP BY Cust_id, Customer_Name 
+ORDER BY COUNT(Ord_id) DESC
 
 --ANSWER 3
 
@@ -178,87 +177,146 @@ SET DaysTakenForDelivery = DATEDIFF(d, Order_Date, Ship_Date)
 
 --ANSWER 4
 
-SELECT Customer_Name, DaysTakenForDelivery AS MaxDaysTakenForDelivery
+SELECT Cust_id, Customer_Name, Order_Date, Ship_Date, DaysTakenForDelivery AS MaxDaysTakenForDelivery
 FROM combined_table
 WHERE DaysTakenForDelivery = (
 			SELECT MAX(DaysTakenForDelivery)  
 			FROM combined_table
 			)
 
+
 --ANSWER 5
 
 SELECT Prod_id, Product_Name, SUM(Sales) 
 OVER(PARTITION BY Prod_id) AS Product_Total_Sales 
 FROM combined_table 
-ORDER BY Prod_id
+--ORDER BY Prod_id
 
 --ANSWER 6
 
-SELECT Prod_id, Product_Name, SUM(Profit) 
+SELECT DISTINCT Prod_id, Product_Name, SUM(Profit) 
 OVER(PARTITION BY Prod_id) AS Each_Products_Total_Profit 
 FROM combined_table 
-ORDER BY Prod_id
+ORDER BY 3 DESC
 
 --ANSWER 7
 
-SELECT COUNT(DISTINCT Customer_Name) Total_Customers_Visits_in_January  
+SELECT COUNT(DISTINCT Cust_id) Total_Customers_Visits_in_January  
 FROM combined_table 
 WHERE MONTH(Order_Date) = 1 AND YEAR(Order_Date) = 2011
 
-SELECT Customer_Name
-FROM combined_table
-WHERE YEAR(Order_Date) = 2021 and Customer_Name IN (
-		SELECT DISTINCT Customer_Name Total_Customers_Visits_in_January  
-		FROM combined_table 
-		WHERE MONTH(Order_Date) = 1 AND YEAR(Order_Date) = 2011)
-HAVING (COUNT(DISTINCT MONTH(Order_Date))=12)
+SELECT	DISTINCT MONTH(Order_Date) [month], 
+		Count(DISTINCT Cust_id) count_customerS
+FROM combined_table A
+WHERE EXISTS (
+		SELECT Cust_id
+		FROM combined_table B 
+		WHERE A.Cust_id = B.Cust_id 
+		And MONTH(Order_Date) = 1 
+		AND YEAR(Order_Date) = 2011
+		)
+AND  YEAR(Order_Date) = 2011
+GROUP BY MONTH(Order_Date)
 
+--Below query shows; Customers who visit a store in 2011, january also visits any store/stores n times  again 2011 another month
 
-/*SELECT Customer_Name, COUNT(DISTINCT MONTH(Order_Date)) OVER(Partition By Customer_Name order by Order_Date DESC ROWS BETWEEN  UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) 
-
-FROM combined_table
-Order BY Customer_Name, Order_Date*/
-
-SELECT Customer_Name, Seperate_Month_Visit 
+SELECT DISTINCT Cust_id, Customer_Name, Seperate_Month_Visit 
 FROM (
-	SELECT Customer_Name, Order_Date, DENSE_RANK() OVER(PARTITION BY (Customer_Name) ORDER BY  MONTH(Order_Date)) AS Seperate_Month_Visit
+	SELECT Cust_id, Customer_Name, Order_Date, DENSE_RANK() OVER(PARTITION BY (Cust_id) ORDER BY  MONTH(Order_Date)) AS Seperate_Month_Visit
 	FROM combined_table 
 	WHERE YEAR(Order_Date) = 2011) Temp
 	--ORDER BY Customer_Name, Order_Date
-	WHERE Seperate_Month_Visit = 12
+	WHERE Seperate_Month_Visit = 5 --n
 
 
 --ANSWER 8
-SELECT Cust_id, Customer_Name,First_Order, t1.Order_Date AS Thirth_Order, DATEDIFF(d,First_Order,t1.Order_Date) DifferenceDay 
+
+SELECT DISTINCT Cust_id, Customer_Name, First_Order, t1.Order_Date AS Thirth_Order, DATEDIFF(d,First_Order,t1.Order_Date) DifferenceDay 
 FROM (
-		SELECT Customer_Name, Order_Date, Cust_id, ROW_NUMBER() OVER(PARTITION BY Cust_id ORDER BY Order_Date) RN,
+		SELECT Customer_Name, Order_Date, Cust_id, DENSE_RANK() OVER(PARTITION BY Cust_id ORDER BY Order_Date) RN,
 				FIRST_VALUE(Order_Date) OVER(PARTITION BY Cust_id ORDER BY Order_Date) First_Order
 		FROM combined_table) AS t1
 WHERE RN = 3
 
 ---Answer 9
-WITH cte AS (
-	SELECT Cust_id, Customer_Name, Prod_id, Order_Quantity, SUM(Order_Quantity) OVER(PARTITION by Prod_id) AS each_prod_quantity_sum 
+
+WITH cte1 AS (
+	SELECT Cust_id, Customer_Name, COUNT(Prod_id) OVER(PARTITION BY Cust_id) Prod11Count
 	FROM combined_table 
-	WHERE Prod_id in (11,14))
-SELECT *, CAST(Order_Quantity AS DECIMAL)/each_prod_quantity_sum AS Quantity_Ratio 
+	WHERE Prod_id = 11
+), cte2 AS(
+	SELECT Cust_id, Customer_Name, COUNT(Prod_id) OVER(PARTITION BY Cust_id) Prod14Count
+	FROM combined_table 
+	WHERE Prod_id = 14
+), cte3 AS(
+	SELECT Cust_id, Customer_Name, COUNT(Prod_id) OVER(PARTITION BY Cust_id) ProdCount
+	FROM combined_table 
+)SELECT DISTINCT cte1.Cust_id,cte1.Customer_Name, Prod11Count, Prod14Count, ProdCount,
+		CAST(1.0*Prod11Count/ProdCount AS numeric(3,2)) AS P11_Quantity_Ratio,
+		CAST(1.0*Prod14Count/ProdCount AS numeric(3,2)) AS P14_Quantity_Ratio
+FROM cte1, cte2,cte3 
+WHERE cte1.Cust_id = cte2.Cust_id AND cte1.Cust_id=cte3.Cust_id
+
+
+SELECT Cust_id,Customer_Name, Order_Quantity, CAST(Order_Quantity AS DECIMAL)/each_prod_quantity_sum AS Quantity_Ratio 
 FROM cte
 ORDER BY Cust_id
 
 --Second Part
---1.2,3,4,5
---Create view Montly_Visit as (
-		SELECT *, LEAD(Order_Date,1) OVER(PARTITION BY Cust_id ORDER BY Order_Date) AS Next_Visit,
-				DATEDIFF(d,LEAD(Order_Date,1) OVER(PARTITION by Cust_id ORDER BY Order_Date),Order_Date) Next_Visit_This_Month,
-				CASE COALESCE(DATEDIFF(d,LEAD(Order_Date,1) OVER(PARTITION BY Cust_id ORDER BY Order_Date),Order_Date),-1)
-					WHEN -1 THEN 'Churned'
-					WHEN 0 THEN 'Retained'
-					WHEN 1 THEN 'Retained'
-					ELSE 'Irregular'
-					END Retention_Month
-		FROM combined_table
-		WHERE DATEPART(m, Order_Date) = DATEPART(m, DATEADD(m, -1, '2009-02-01'))
-		AND DATEPART(yyyy, Order_Date) = DATEPART(yyyy, DATEADD(m, -1, '2009-02-01'))
+
+--1. Create a view where each user’s visits are logged by month, 
+--	allowing for the possibility that these will have occurred over multiple years since whenever business started operations.
+
+CREATE VIEW CUSTOMER_LOGS AS
+SELECT	Cust_id,
+		YEAR (Order_Date) [Year],
+		MONTH(Order_Date) [Month],
+		COUNT (*) total_visit,
+		DENSE_RANK() OVER (ORDER BY YEAR (Order_Date), MONTH(Order_Date)) AS DENSE_MONTH
+FROM	combined_table
+GROUP BY	
+		Cust_id, MONTH(Order_Date), YEAR (Order_Date)
+
+--2. Identify the time lapse between each visit. So, for each person and for each month, we see when the next visit is.
+
+CREATE VIEW NEXT_VISIT_VW AS
+SELECT	*,
+		LEAD (DENSE_MONTH) OVER (PARTITION BY cust_id ORDER BY DENSE_MONTH) NEXT_VISIT_MONTH
+FROM	CUSTOMER_LOGS
+
+
+--3. Calculate the time gaps between visits.
+
+CREATE VIEW TIME_GAPS_VW AS 
+SELECT	*, NEXT_VISIT_MONTH - DENSE_MONTH AS TIME_GAPS
+FROM	NEXT_VISIT_VW
+
+--4. Categorise the customer with time gap 1 as retained, >1 as irregular and NULL as churned.
+
+SELECT cust_id, AVG_TIME_GAP,
+		CASE 
+			WHEN AVG_TIME_GAP = 1 THEN 'retained'
+			WHEN AVG_TIME_GAP >1 THEN 'irregular'
+			WHEN AVG_TIME_GAP IS NULL THEN 'churned'
+		ELSE 'UNKNOWN DATA' END CUST_CLASS
+FROM
+		(
+		SELECT	cust_id, AVG (TIME_GAPS) AVG_TIME_GAP
+		FROM	TIME_GAPS_VW
+		GROUP BY 
+				cust_id
+		) A
+
+--5. Calculate the retention month wise.
+SELECT  DISTINCT
+		NEXT_VISIT_MONTH as retention_month,
+		COUNT (cust_id) OVER (PARTITION BY NEXT_VISIT_MONTH ) RETENTION_SUM_MONTHLY
+FROM 
+TIME_GAPS_VW
+WHERE
+TIME_GAPS = 1
+ORDER BY
+		1 
 
 
 
